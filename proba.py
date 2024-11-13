@@ -1,9 +1,46 @@
-# First import the necessary libraries
 import os
 
 import tensorflow as tf
 
-BASE_DIR = "cats_and_dogs_filtered"
+# Set the weights file you downloaded into a variable
+local_weights_file = "inception_v3_weights_tf_dim_ordering_tf_kernels_notop.h5"
+
+# Initialize the base model.
+# Set the input shape and remove the dense layers.
+pre_trained_model = tf.keras.applications.inception_v3.InceptionV3(
+    input_shape=(150, 150, 3), include_top=False, weights=None
+)
+
+# Load the pre-trained weights you downloaded.
+pre_trained_model.load_weights(local_weights_file)
+
+# Freeze the weights of the layers.
+for layer in pre_trained_model.layers:
+    layer.trainable = False
+
+pre_trained_model.summary()
+
+# Choose `mixed7` as the last layer of your base model
+last_layer = pre_trained_model.get_layer("mixed7")
+print("last layer output shape: ", last_layer.output.shape)
+last_output = last_layer.output
+
+# Flatten the output layer to 1 dimension
+x = tf.keras.layers.Flatten()(last_output)
+# Add a fully connected layer with 1,024 hidden units and ReLU activation
+x = tf.keras.layers.Dense(1024, activation="relu")(x)
+# Add a dropout rate of 0.2
+x = tf.keras.layers.Dropout(0.2)(x)
+# Add a final sigmoid layer for classification
+x = tf.keras.layers.Dense(1, activation="sigmoid")(x)
+
+# Append the dense network to the base model
+model = tf.keras.Model(pre_trained_model.input, x)
+
+# Print the model summary. See your dense network connected at the end.
+model.summary()
+
+BASE_DIR = "/tf/cats_and_dogs_filtered"
 
 train_dir = os.path.join(BASE_DIR, "train")
 validation_dir = os.path.join(BASE_DIR, "validation")
@@ -16,117 +53,59 @@ train_dogs_dir = os.path.join(train_dir, "dogs")
 validation_cats_dir = os.path.join(validation_dir, "cats")
 validation_dogs_dir = os.path.join(validation_dir, "dogs")
 
-print(f"Contents of base directory: {os.listdir(BASE_DIR)}")
-
-print(f"\nContents of train directory: {os.listdir(train_dir)}")
-
-print(f"\nContents of validation directory: {os.listdir(validation_dir)}")
-
-
-def create_model():
-    """Creates a CNN with 4 convolutional layers"""
-    model = tf.keras.models.Sequential(
-        [
-            tf.keras.Input(shape=(150, 150, 3)),
-            tf.keras.layers.Rescaling(1.0 / 255),
-            tf.keras.layers.Conv2D(32, (3, 3), activation="relu"),
-            tf.keras.layers.MaxPooling2D(2, 2),
-            tf.keras.layers.Conv2D(64, (3, 3), activation="relu"),
-            tf.keras.layers.MaxPooling2D(2, 2),
-            tf.keras.layers.Conv2D(128, (3, 3), activation="relu"),
-            tf.keras.layers.MaxPooling2D(2, 2),
-            tf.keras.layers.Conv2D(128, (3, 3), activation="relu"),
-            tf.keras.layers.MaxPooling2D(2, 2),
-            tf.keras.layers.Flatten(),
-            tf.keras.layers.Dense(512, activation="relu"),
-            tf.keras.layers.Dense(1, activation="sigmoid"),
-        ]
-    )
-
-    return model
-
-
-# Instantiate the training dataset
+# Prepare the training set
 train_dataset = tf.keras.utils.image_dataset_from_directory(
     train_dir, image_size=(150, 150), batch_size=20, label_mode="binary"
 )
 
-# Instantiate the validation dataset
+# Prepare the validation set
 validation_dataset = tf.keras.utils.image_dataset_from_directory(
     validation_dir, image_size=(150, 150), batch_size=20, label_mode="binary"
 )
+
+
+# Define the preprocess function
+def preprocess(image, label):
+    image = tf.keras.applications.inception_v3.preprocess_input(image)
+    return image, label
+
+
+# Apply the preprocessing to the datasets
+train_dataset_scaled = train_dataset.map(preprocess)
+validation_dataset_scaled = validation_dataset.map(preprocess)
 
 # Optimize the datasets for training
 SHUFFLE_BUFFER_SIZE = 1000
 PREFETCH_BUFFER_SIZE = tf.data.AUTOTUNE
 
-train_dataset_final = train_dataset.cache().shuffle(SHUFFLE_BUFFER_SIZE).prefetch(PREFETCH_BUFFER_SIZE)
+train_dataset_final = train_dataset_scaled.cache().shuffle(SHUFFLE_BUFFER_SIZE).prefetch(PREFETCH_BUFFER_SIZE)
 
-validation_dataset_final = validation_dataset.cache().prefetch(PREFETCH_BUFFER_SIZE)
+validation_dataset_final = validation_dataset_scaled.cache().prefetch(PREFETCH_BUFFER_SIZE)
 
-# Define fill mode.
-FILL_MODE = "nearest"
-
-# Create the augmentation model.
+# Create a model with data augmentation layers
 data_augmentation = tf.keras.Sequential(
     [
-        # Specify the input shape.
-        tf.keras.Input(shape=(150, 150, 3)),
-        # Add the augmentation layers
         tf.keras.layers.RandomFlip("horizontal"),
-        tf.keras.layers.RandomRotation(0.2, fill_mode=FILL_MODE),
-        tf.keras.layers.RandomTranslation(0.2, 0.2, fill_mode=FILL_MODE),
-        tf.keras.layers.RandomZoom(0.2, fill_mode=FILL_MODE),
+        tf.keras.layers.RandomRotation(0.4),
+        tf.keras.layers.RandomTranslation(0.2, 0.2),
+        tf.keras.layers.RandomContrast(0.4),
+        tf.keras.layers.RandomZoom(0.2),
     ]
 )
 
+# Attach the data augmentation model to the base model
+inputs = tf.keras.Input(shape=(150, 150, 3))
+x = data_augmentation(inputs)
+x = model(x)
 
-def demo_augmentation(sample_image, model, num_aug):
-    """Takes a single image array, then uses a model to generate num_aug transformations"""
+model_with_aug = tf.keras.Model(inputs, x)
 
-    # Instantiate preview list
-    image_preview = []
-
-    # Convert input image to a PIL image instance
-    sample_image_pil = tf.keras.utils.array_to_img(sample_image)
-
-    # Append the result to the list
-    image_preview.append(sample_image_pil)
-
-    # Apply the image augmentation and append the results to the list
-    for i in range(NUM_AUG):
-        sample_image_aug = model(tf.expand_dims(sample_image, axis=0))
-        sample_image_aug_pil = tf.keras.utils.array_to_img(tf.squeeze(sample_image_aug))
-        image_preview.append(sample_image_aug_pil)
-
-    # Instantiate a subplot
-    fig, axes = plt.subplots(1, NUM_AUG + 1, figsize=(12, 12))
-
-    # Preview the images.
-    for index, ax in enumerate(axes):
-        ax.imshow(image_preview[index])
-        ax.set_axis_off()
-
-        if index == 0:
-            ax.set_title("original")
-        else:
-            ax.set_title(f"augment {index}")
-
-
-# Instantiate the base model
-model_without_aug = create_model()
-
-# Prepend the data augmentation layers to the base model
-model_with_aug = tf.keras.models.Sequential([data_augmentation, model_without_aug])
-
-# Compile the model
+# Set the training parameters
 model_with_aug.compile(
-    loss="binary_crossentropy", optimizer=tf.keras.optimizers.RMSprop(learning_rate=1e-4), metrics=["accuracy"]
+    optimizer=tf.keras.optimizers.RMSprop(learning_rate=0.0001), loss="binary_crossentropy", metrics=["accuracy"]
 )
 
-EPOCHS = 80
+EPOCHS = 20
 
-# Train the new model
-history_with_aug = model_with_aug.fit(
-    train_dataset_final, epochs=EPOCHS, validation_data=validation_dataset_final, verbose=2
-)
+# Train the model.
+history = model_with_aug.fit(train_dataset_final, validation_data=validation_dataset_final, epochs=EPOCHS, verbose=2)
