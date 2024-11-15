@@ -1,98 +1,76 @@
 import tensorflow as tf
+import json
+import tensorflow_datasets as tfds
+from tensorflow.keras.utils import pad_sequences
 
-# Sample inputs
-sentences = ["I love my dog", "I love my cat", "You love my dog!", "Do you think my dog is amazing?"]
+# Download the dataset
+!wget -nc https://storage.googleapis.com/tensorflow-1-public/course3/sarcasm.json
 
-# Initialize the layer
+# Load the JSON file
+with open("./sarcasm.json", 'r') as f:
+    datastore = json.load(f)
+
+# Non-sarcastic headline
+print(datastore[0])
+
+# Sarcastic headline
+print(datastore[20000])
+
+# Append the headline elements into the list
+sentences = [item['headline'] for item in datastore]
+
+# Instantiate the layer
 vectorize_layer = tf.keras.layers.TextVectorization()
 
-# Compute the vocabulary
+# Build the vocabulary
 vectorize_layer.adapt(sentences)
 
-# Get the vocabulary
-vocabulary = vectorize_layer.get_vocabulary()
+# Apply the layer for post padding
+post_padded_sequences = vectorize_layer(sentences)
 
-# Print the token index
-for index, word in enumerate(vocabulary):
-    print(index, word)
-
-# String input
-sample_input = "I love my dog"
-
-# Convert the string input to an integer sequence
-sequence = vectorize_layer(sample_input)
-
-# Print the result
-print(sequence)
-
-# Convert the list to tf.data.Dataset
-sentences_dataset = tf.data.Dataset.from_tensor_slices(sentences)
-
-# Define a mapping function to convert each sample input
-sequences = sentences_dataset.map(vectorize_layer)
-
-# Print the integer sequences
-for sentence, sequence in zip(sentences, sequences):
-    print(f"{sentence} ---> {sequence}")
-
-# Apply the layer to the string input list
-sequences_post = vectorize_layer(sentences)
-
-# Print the results
-print("INPUT:")
-print(sentences)
+# Print a sample headline and sequence
+index = 2
+print(f'sample headline: {sentences[index]}')
+print(f'padded sequence: {post_padded_sequences[index]}')
 print()
 
-print("OUTPUT:")
-print(sequences_post)
+# Print dimensions of padded sequences
+print(f'shape of padded sequences: {post_padded_sequences.shape}')
 
-# Pre-pad the sequences to a uniform length.
-# You can remove the `padding` argument and get the same result.
-sequences_pre = tf.keras.utils.pad_sequences(sequences, padding="pre")
-
-# Print the results
-print("INPUT:")
-[print(sequence.numpy()) for sequence in sequences]
-print()
-
-print("OUTPUT:")
-print(sequences_pre)
-
-# Post-pad the sequences and limit the size to 5.
-sequences_post_trunc = tf.keras.utils.pad_sequences(sequences, maxlen=5, padding="pre")
-
-# Print the results
-print("INPUT:")
-[print(sequence.numpy()) for sequence in sequences]
-print()
-
-print("OUTPUT:")
-print(sequences_post_trunc)
-
-# Set the layer to output a ragged tensor
+# Instantiate the layer and set the `ragged` flag to `True`
 vectorize_layer = tf.keras.layers.TextVectorization(ragged=True)
 
-# Compute the vocabulary
+# Build the vocabulary
 vectorize_layer.adapt(sentences)
 
-# Apply the layer to the sentences
+# Apply the layer to generate a ragged tensor
 ragged_sequences = vectorize_layer(sentences)
 
-# Print the results
-print(ragged_sequences)
+# Print a sample headline and sequence
+index = 2
+print(f'sample headline: {sentences[index]}')
+print(f'padded sequence: {ragged_sequences[index]}')
+print()
 
-# Pre-pad the sequences in the ragged tensor
-sequences_pre = tf.keras.utils.pad_sequences(ragged_sequences.numpy())
+# Print dimensions of padded sequences
+print(f'shape of padded sequences: {ragged_sequences.shape}')
 
-# Print the results
-print(sequences_pre)
+# Apply pre-padding to the ragged tensor
+pre_padded_sequences = pad_sequences(ragged_sequences.numpy())
 
-# Try with words that are not in the vocabulary
-sentences_with_oov = ["i really love my dog", "my dog loves my manatee"]
+# Preview the result for the 2nd sequence
+pre_padded_sequences[2]
 
-# Generate the sequences
-sequences_with_oov = vectorize_layer(sentences_with_oov)
+# Print a sample headline and sequence
+index = 2
+print(f'sample headline: {sentences[index]}')
+print()
+print(f'post-padded sequence: {post_padded_sequences[index]}')
+print()
+print(f'pre-padded sequence: {pre_padded_sequences[index]}')
+print()
 
-# Print the integer sequences
-for sentence, sequence in zip(sentences_with_oov, sequences_with_oov):
-    print(f"{sentence} ---> {sequence}")
+# Print dimensions of padded sequences
+print(f'shape of post-padded sequences: {post_padded_sequences.shape}')
+print(f'shape of pre-padded sequences: {pre_padded_sequences.shape}')
+
