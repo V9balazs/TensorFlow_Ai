@@ -1,4 +1,5 @@
 import keras_nlp
+import numpy as np
 import tensorflow as tf
 import tensorflow_datasets as tfds
 
@@ -60,9 +61,37 @@ train_dataset_final = (
 
 test_dataset_final = test_dataset_vectorized.cache().prefetch(buffer_size=PREFETCH_BUFFER_SIZE).batch(BATCH_SIZE)
 
-# Model Parameters
+# Multiple LSTM model
+
+# Parameters
+BATCH_SIZE = 1
+TIMESTEPS = 20
+FEATURES = 16
+LSTM_DIM = 8
+
+print(f"batch_size: {BATCH_SIZE}")
+print(f"timesteps (sequence length): {TIMESTEPS}")
+print(f"features (embedding size): {FEATURES}")
+print(f"lstm output units: {LSTM_DIM}")
+
+# Define array input with random values
+random_input = np.random.rand(BATCH_SIZE, TIMESTEPS, FEATURES)
+print(f"shape of input array: {random_input.shape}")
+
+# Define LSTM that returns a single output
+lstm = tf.keras.layers.LSTM(LSTM_DIM)
+result = lstm(random_input)
+print(f"shape of lstm output(return_sequences=False): {result.shape}")
+
+# Define LSTM that returns a sequence
+lstm_rs = tf.keras.layers.LSTM(LSTM_DIM, return_sequences=True)
+result = lstm_rs(random_input)
+print(f"shape of lstm output(return_sequences=True): {result.shape}")
+
+# Model parameters
 EMBEDDING_DIM = 64
-LSTM_DIM = 64
+LSTM1_DIM = 32
+LSTM2_DIM = 16
 DENSE_DIM = 64
 
 # Build the model
@@ -70,7 +99,8 @@ model = tf.keras.Sequential(
     [
         tf.keras.Input(shape=(None,)),
         tf.keras.layers.Embedding(subword_tokenizer.vocabulary_size(), EMBEDDING_DIM),
-        tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(LSTM_DIM)),
+        tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(LSTM1_DIM, return_sequences=True)),
+        tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(LSTM2_DIM)),
         tf.keras.layers.Dense(DENSE_DIM, activation="relu"),
         tf.keras.layers.Dense(1, activation="sigmoid"),
     ]
@@ -82,6 +112,35 @@ model.summary()
 # Set the training parameters
 model.compile(loss="binary_crossentropy", optimizer="adam", metrics=["accuracy"])
 
-NUM_EPOCHS = 10
+NUM_EPOCHS = 5
 
+# Train the model
 history = model.fit(train_dataset_final, epochs=NUM_EPOCHS, validation_data=test_dataset_final)
+
+# # Single LSTM model
+
+# # Model Parameters
+# EMBEDDING_DIM = 64
+# LSTM_DIM = 64
+# DENSE_DIM = 64
+
+# # Build the model
+# model = tf.keras.Sequential(
+#     [
+#         tf.keras.Input(shape=(None,)),
+#         tf.keras.layers.Embedding(subword_tokenizer.vocabulary_size(), EMBEDDING_DIM),
+#         tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(LSTM_DIM)),
+#         tf.keras.layers.Dense(DENSE_DIM, activation="relu"),
+#         tf.keras.layers.Dense(1, activation="sigmoid"),
+#     ]
+# )
+
+# # Print the model summary
+# model.summary()
+
+# # Set the training parameters
+# model.compile(loss="binary_crossentropy", optimizer="adam", metrics=["accuracy"])
+
+# NUM_EPOCHS = 10
+
+# history = model.fit(train_dataset_final, epochs=NUM_EPOCHS, validation_data=test_dataset_final)
