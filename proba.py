@@ -4,7 +4,7 @@ import tensorflow as tf
 import tensorflow_datasets as tfds
 
 # The dataset is already downloaded for you. For downloading you can use the code below.
-imdb = tfds.load("imdb_reviews", as_supervised=True, data_dir="/", download=False)
+imdb = tfds.load("imdb_reviews", as_supervised=True, data_dir="../data/", download=False)
 
 # Extract the train reviews and labels
 train_reviews = imdb["train"].map(lambda review, label: review)
@@ -61,37 +61,37 @@ train_dataset_final = (
 
 test_dataset_final = test_dataset_vectorized.cache().prefetch(buffer_size=PREFETCH_BUFFER_SIZE).batch(BATCH_SIZE)
 
-# Multiple LSTM model
-
 # Parameters
 BATCH_SIZE = 1
 TIMESTEPS = 20
-FEATURES = 16
-LSTM_DIM = 8
+FEATURES = 20
+FILTERS = 128
+KERNEL_SIZE = 5
 
 print(f"batch_size: {BATCH_SIZE}")
 print(f"timesteps (sequence length): {TIMESTEPS}")
 print(f"features (embedding size): {FEATURES}")
-print(f"lstm output units: {LSTM_DIM}")
+print(f"filters: {FILTERS}")
+print(f"kernel_size: {KERNEL_SIZE}")
 
 # Define array input with random values
 random_input = np.random.rand(BATCH_SIZE, TIMESTEPS, FEATURES)
 print(f"shape of input array: {random_input.shape}")
 
-# Define LSTM that returns a single output
-lstm = tf.keras.layers.LSTM(LSTM_DIM)
-result = lstm(random_input)
-print(f"shape of lstm output(return_sequences=False): {result.shape}")
+# Pass array to convolution layer and inspect output shape
+conv1d = tf.keras.layers.Conv1D(filters=FILTERS, kernel_size=KERNEL_SIZE, activation="relu")
+result = conv1d(random_input)
+print(f"shape of conv1d output: {result.shape}")
 
-# Define LSTM that returns a sequence
-lstm_rs = tf.keras.layers.LSTM(LSTM_DIM, return_sequences=True)
-result = lstm_rs(random_input)
-print(f"shape of lstm output(return_sequences=True): {result.shape}")
+# Pass array to max pooling layer and inspect output shape
+gmp = tf.keras.layers.GlobalMaxPooling1D()
+result = gmp(result)
+print(f"shape of global max pooling output: {result.shape}")
 
-# Model parameters
+# Hyperparameters
 EMBEDDING_DIM = 64
-LSTM1_DIM = 32
-LSTM2_DIM = 16
+FILTERS = 128
+KERNEL_SIZE = 5
 DENSE_DIM = 64
 
 # Build the model
@@ -99,8 +99,8 @@ model = tf.keras.Sequential(
     [
         tf.keras.Input(shape=(None,)),
         tf.keras.layers.Embedding(subword_tokenizer.vocabulary_size(), EMBEDDING_DIM),
-        tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(LSTM1_DIM, return_sequences=True)),
-        tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(LSTM2_DIM)),
+        tf.keras.layers.Conv1D(filters=FILTERS, kernel_size=KERNEL_SIZE, activation="relu"),
+        tf.keras.layers.GlobalMaxPooling1D(),
         tf.keras.layers.Dense(DENSE_DIM, activation="relu"),
         tf.keras.layers.Dense(1, activation="sigmoid"),
     ]
@@ -112,35 +112,7 @@ model.summary()
 # Set the training parameters
 model.compile(loss="binary_crossentropy", optimizer="adam", metrics=["accuracy"])
 
-NUM_EPOCHS = 5
+NUM_EPOCHS = 10
 
 # Train the model
 history = model.fit(train_dataset_final, epochs=NUM_EPOCHS, validation_data=test_dataset_final)
-
-# # Single LSTM model
-
-# # Model Parameters
-# EMBEDDING_DIM = 64
-# LSTM_DIM = 64
-# DENSE_DIM = 64
-
-# # Build the model
-# model = tf.keras.Sequential(
-#     [
-#         tf.keras.Input(shape=(None,)),
-#         tf.keras.layers.Embedding(subword_tokenizer.vocabulary_size(), EMBEDDING_DIM),
-#         tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(LSTM_DIM)),
-#         tf.keras.layers.Dense(DENSE_DIM, activation="relu"),
-#         tf.keras.layers.Dense(1, activation="sigmoid"),
-#     ]
-# )
-
-# # Print the model summary
-# model.summary()
-
-# # Set the training parameters
-# model.compile(loss="binary_crossentropy", optimizer="adam", metrics=["accuracy"])
-
-# NUM_EPOCHS = 10
-
-# history = model.fit(train_dataset_final, epochs=NUM_EPOCHS, validation_data=test_dataset_final)
