@@ -98,27 +98,29 @@ test_dataset_final = test_dataset_vectorized.cache().prefetch(PREFETCH_BUFFER_SI
 
 # Parameters
 EMBEDDING_DIM = 16
-LSTM_DIM = 32
-DENSE_DIM = 24
+FILTERS = 128
+KERNEL_SIZE = 5
+DENSE_DIM = 6
 
-# Model Definition with LSTM
-model_lstm = tf.keras.Sequential(
+# Model Definition with Conv1D
+model_conv = tf.keras.Sequential(
     [
         tf.keras.Input(shape=(MAX_LENGTH,)),
         tf.keras.layers.Embedding(input_dim=VOCAB_SIZE, output_dim=EMBEDDING_DIM),
-        tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(LSTM_DIM)),
+        tf.keras.layers.Conv1D(FILTERS, KERNEL_SIZE, activation="relu"),
+        tf.keras.layers.GlobalMaxPooling1D(),
         tf.keras.layers.Dense(DENSE_DIM, activation="relu"),
         tf.keras.layers.Dense(1, activation="sigmoid"),
     ]
 )
 
 # Set the training parameters
-model_lstm.compile(loss="binary_crossentropy", optimizer="adam", metrics=["accuracy"])
+model_conv.compile(loss="binary_crossentropy", optimizer="adam", metrics=["accuracy"])
 
 # Print the model summary
-model_lstm.summary()
+model_conv.summary()
 
 NUM_EPOCHS = 10
 
 # Train the model
-history_lstm = model_lstm.fit(train_dataset_final, epochs=NUM_EPOCHS, validation_data=test_dataset_final)
+history_conv = model_conv.fit(train_dataset_final, epochs=NUM_EPOCHS, validation_data=test_dataset_final)
