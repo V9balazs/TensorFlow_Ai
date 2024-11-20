@@ -1,31 +1,52 @@
-import numpy as np
+import json
+
 import tensorflow as tf
-import tensorflow_datasets as tfds
 
-# The dataset is already downloaded for you. For downloading you can use the code below.
-imdb = tfds.load("imdb_reviews", as_supervised=True, data_dir="../data/", download=False)
+# Load the JSON file
+with open("./sarcasm.json", "r") as f:
+    datastore = json.load(f)
 
-# Get the train and test sets
-train_dataset, test_dataset = imdb["train"], imdb["test"]
+# Initialize the lists
+sentences = []
+labels = []
 
-# Vectorization and Padding Parameters
+# Collect sentences and labels into the lists
+for item in datastore:
+    sentences.append(item["headline"])
+    labels.append(item["is_sarcastic"])
 
+# Number of examples to use for training
+TRAINING_SIZE = 20000
+
+# Vocabulary size of the tokenizer
 VOCAB_SIZE = 10000
-MAX_LENGTH = 120
+
+# Maximum length of the padded sequences
+MAX_LENGTH = 32
+
+# Type of padding
 PADDING_TYPE = "pre"
+
+# Specifies how to truncate the sequences
 TRUNC_TYPE = "post"
+
+# Split the sentences
+train_sentences = sentences[0:TRAINING_SIZE]
+test_sentences = sentences[TRAINING_SIZE:]
+
+# Split the labels
+train_labels = labels[0:TRAINING_SIZE]
+test_labels = labels[TRAINING_SIZE:]
 
 # Instantiate the vectorization layer
 vectorize_layer = tf.keras.layers.TextVectorization(max_tokens=VOCAB_SIZE)
 
-# Get the string inputs and integer outputs of the training set
-train_reviews = train_dataset.map(lambda review, label: review)
+# Generate the vocabulary based on the training inputs
+vectorize_layer.adapt(train_sentences)
 
-# Generate the vocabulary based only on the training set
-vectorize_layer.adapt(train_reviews)
-
-# Delete because it's no longer needed
-del train_reviews
+# Put the sentences and labels in a tf.data.Dataset
+train_dataset = tf.data.Dataset.from_tensor_slices((train_sentences, train_labels))
+test_dataset = tf.data.Dataset.from_tensor_slices((test_sentences, test_labels))
 
 
 def preprocessing_fn(dataset):
@@ -75,38 +96,10 @@ train_dataset_final = (
 
 test_dataset_final = test_dataset_vectorized.cache().prefetch(PREFETCH_BUFFER_SIZE).batch(BATCH_SIZE)
 
-# Flatten model
-# Parameters
-EMBEDDING_DIM = 16
-DENSE_DIM = 6
-
-# Model Definition with a Flatten layer
-model_flatten = tf.keras.Sequential(
-    [
-        tf.keras.Input(shape=(MAX_LENGTH,)),
-        tf.keras.layers.Embedding(input_dim=VOCAB_SIZE, output_dim=EMBEDDING_DIM),
-        tf.keras.layers.Flatten(),
-        tf.keras.layers.Dense(DENSE_DIM, activation="relu"),
-        tf.keras.layers.Dense(1, activation="sigmoid"),
-    ]
-)
-
-# Set the training parameters
-model_flatten.compile(loss="binary_crossentropy", optimizer="adam", metrics=["accuracy"])
-
-# Print the model summary
-model_flatten.summary()
-
-NUM_EPOCHS = 10
-
-# Train the model
-history_flatten = model_flatten.fit(train_dataset_final, epochs=NUM_EPOCHS, validation_data=(test_dataset_final))
-
-# LSTM model
 # Parameters
 EMBEDDING_DIM = 16
 LSTM_DIM = 32
-DENSE_DIM = 6
+DENSE_DIM = 24
 
 # Model Definition with LSTM
 model_lstm = tf.keras.Sequential(
@@ -129,61 +122,3 @@ NUM_EPOCHS = 10
 
 # Train the model
 history_lstm = model_lstm.fit(train_dataset_final, epochs=NUM_EPOCHS, validation_data=test_dataset_final)
-
-# GRU model
-# Parameters
-EMBEDDING_DIM = 16
-GRU_DIM = 32
-DENSE_DIM = 6
-
-# Model Definition with GRU
-model_gru = tf.keras.Sequential(
-    [
-        tf.keras.Input(shape=(MAX_LENGTH,)),
-        tf.keras.layers.Embedding(input_dim=VOCAB_SIZE, output_dim=EMBEDDING_DIM),
-        tf.keras.layers.Bidirectional(tf.keras.layers.GRU(GRU_DIM)),
-        tf.keras.layers.Dense(DENSE_DIM, activation="relu"),
-        tf.keras.layers.Dense(1, activation="sigmoid"),
-    ]
-)
-
-# Set the training parameters
-model_gru.compile(loss="binary_crossentropy", optimizer="adam", metrics=["accuracy"])
-
-# Print the model summary
-model_gru.summary()
-
-NUM_EPOCHS = 10
-
-# Train the model
-history_gru = model_gru.fit(train_dataset_final, epochs=NUM_EPOCHS, validation_data=(test_dataset_final))
-
-# Convolutional model
-# Parameters
-EMBEDDING_DIM = 16
-FILTERS = 128
-KERNEL_SIZE = 5
-DENSE_DIM = 6
-
-# Model Definition with Conv1D
-model_conv = tf.keras.Sequential(
-    [
-        tf.keras.Input(shape=(MAX_LENGTH,)),
-        tf.keras.layers.Embedding(input_dim=VOCAB_SIZE, output_dim=EMBEDDING_DIM),
-        tf.keras.layers.Conv1D(FILTERS, KERNEL_SIZE, activation="relu"),
-        tf.keras.layers.GlobalAveragePooling1D(),
-        tf.keras.layers.Dense(DENSE_DIM, activation="relu"),
-        tf.keras.layers.Dense(1, activation="sigmoid"),
-    ]
-)
-
-# Set the training parameters
-model_conv.compile(loss="binary_crossentropy", optimizer="adam", metrics=["accuracy"])
-
-# Print the model summary
-model_conv.summary()
-
-NUM_EPOCHS = 10
-
-# Train the model
-history_conv = model_conv.fit(train_dataset_final, epochs=NUM_EPOCHS, validation_data=(test_dataset_final))
