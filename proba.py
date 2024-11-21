@@ -1,250 +1,235 @@
+import os
+import time
+
 import numpy as np
 import tensorflow as tf
 
-# Load the dataset
-data = open("Laurences_generated_poetry.txt", encoding="utf-8").read()
+path_to_file = f"./data/shakespeare.txt"
 
-# Lowercase and split the text
-corpus = data.lower().split("\n")
+# Read, then decode for py2 compat.
+text = open(path_to_file, "rb").read().decode(encoding="utf-8")
+# length of text is the number of characters in it
+print(f"Length of text: {len(text)} characters")
 
-# Preview the result
-# print(corpus)
+# Take a look at the first 250 characters in text
+print(text[:250])
 
-# Initialize the vectorization layer
-vectorize_layer = tf.keras.layers.TextVectorization()
+# The unique characters in the file
+vocab = sorted(set(text))
+print(f"{len(vocab)} unique characters")
 
-# Build the vocabulary
-vectorize_layer.adapt(corpus)
+example_texts = ["abcdefg", "xyz"]
 
-# Get the vocabulary and its size
-vocabulary = vectorize_layer.get_vocabulary()
-vocab_size = len(vocabulary)
+chars = tf.strings.unicode_split(example_texts, input_encoding="UTF-8")
+chars
 
-# print(f"{vocabulary}")
-# print(f"{vocab_size}")
+ids_from_chars = tf.keras.layers.StringLookup(vocabulary=list(vocab), mask_token=None)
 
-# Initialize the sequences list
-input_sequences = []
+ids = ids_from_chars(chars)
+ids
 
-# Loop over every line
-for line in corpus:
+chars_from_ids = tf.keras.layers.StringLookup(vocabulary=ids_from_chars.get_vocabulary(), invert=True, mask_token=None)
 
-    # Generate the integer sequence of the current line
-    sequence = vectorize_layer(line).numpy()
+chars = chars_from_ids(ids)
+chars
 
-    # Loop over the line several times to generate the subphrases
-    for i in range(1, len(sequence)):
-
-        # Generate the subphrase
-        n_gram_sequence = sequence[: i + 1]
-
-        # Append the subphrase to the sequences list
-        input_sequences.append(n_gram_sequence)
-
-# Get the length of the longest line
-max_sequence_len = max([len(x) for x in input_sequences])
-
-# Pad all sequences
-input_sequences = np.array(tf.keras.utils.pad_sequences(input_sequences, maxlen=max_sequence_len, padding="pre"))
-
-# Create inputs and label by splitting the last token in the subphrases
-xs, labels = input_sequences[:, :-1], input_sequences[:, -1]
-
-# Convert the label into one-hot arrays
-ys = tf.keras.utils.to_categorical(labels, num_classes=vocab_size)
-
-# Get sample sentence
-sentence = corpus[0].split()
-# print(f"sample sentence: {sentence}")
-
-# Initialize token list
-token_list = []
-
-# Look up the indices of each word and append to the list
-for word in sentence:
-    token_list.append(vocabulary.index(word))
-
-# Print the token list
-# print(token_list)
+tf.strings.reduce_join(chars, axis=-1).numpy()
 
 
-def sequence_to_text(sequence, vocabulary):
-    """utility to convert integer sequence back to text"""
-
-    # Loop through the integer sequence and look up the word from the vocabulary
-    words = [vocabulary[index] for index in sequence]
-
-    # Combine the words into one sentence
-    text = tf.strings.reduce_join(words, separator=" ").numpy().decode()
-
-    return text
+def text_from_ids(ids):
+    return tf.strings.reduce_join(chars_from_ids(ids), axis=-1)
 
 
-# Pick element
-# elem_number = 5
+all_ids = ids_from_chars(tf.strings.unicode_split(text, "UTF-8"))
+all_ids
 
-# Print token list and phrase
-# print(f"token list: {xs[elem_number]}")
-# print(f"decoded to text: {sequence_to_text(xs[elem_number], vocabulary)}")
+ids_dataset = tf.data.Dataset.from_tensor_slices(all_ids)
 
-# Print label
-# print(f"one-hot label: {ys[elem_number]}")
-# print(f"index of label: {np.argmax(ys[elem_number])}")
+for ids in ids_dataset.take(10):
+    print(chars_from_ids(ids).numpy().decode("utf-8"))
 
-PREFETCH_BUFFER_SIZE = tf.data.AUTOTUNE
-BATCH_SIZE = 32
+seq_length = 100
 
-# Put the inputs and labels to a tf.data.Dataset
-dataset = tf.data.Dataset.from_tensor_slices((xs, ys))
+sequences = ids_dataset.batch(seq_length + 1, drop_remainder=True)
 
-# Optimize the dataset for training
-dataset = dataset.cache().prefetch(PREFETCH_BUFFER_SIZE).batch(BATCH_SIZE)
+for seq in sequences.take(1):
+    print(chars_from_ids(seq))
 
-# Parameters
-embedding_dim = 100
-lstm_units = 150
-learning_rate = 0.01
+for seq in sequences.take(5):
+    print(text_from_ids(seq).numpy())
 
-# Build the model
-model = tf.keras.models.Sequential(
+
+def split_input_target(sequence):
+    input_text = sequence[:-1]
+    target_text = sequence[1:]
+    return input_text, target_text
+
+
+split_input_target(list("Tensorflow"))
+
+dataset_split = sequences.map(split_input_target)
+
+for input_example, target_example in dataset_split.take(1):
+    print("Input :", text_from_ids(input_example).numpy())
+    print("Target:", text_from_ids(target_example).numpy())
+
+# Batch size
+BATCH_SIZE = 64
+
+# Buffer size to shuffle the dataset
+# (TF data is designed to work with possibly infinite sequences,
+# so it doesn't attempt to shuffle the entire sequence in memory. Instead,
+# it maintains a buffer in which it shuffles elements).
+BUFFER_SIZE = 10000
+
+dataset = dataset_split.shuffle(BUFFER_SIZE).batch(BATCH_SIZE, drop_remainder=True).cache().prefetch(tf.data.AUTOTUNE)
+
+dataset
+
+# Length of the vocabulary in StringLookup Layer
+vocab_size = len(ids_from_chars.get_vocabulary())
+
+# The embedding dimension
+embedding_dim = 256
+
+# Number of RNN units
+rnn_units = 1024
+
+model = tf.keras.Sequential(
     [
-        tf.keras.Input(shape=(max_sequence_len - 1,)),
         tf.keras.layers.Embedding(vocab_size, embedding_dim),
-        tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(lstm_units)),
-        tf.keras.layers.Dense(vocab_size, activation="softmax"),
+        tf.keras.layers.GRU(rnn_units, return_sequences=True),
+        tf.keras.layers.Dense(vocab_size),
     ]
 )
 
-# Use categorical crossentropy because this is a multi-class problem
-model.compile(
-    loss="categorical_crossentropy",
-    optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate),
-    metrics=["accuracy"],
-)
+for input_example_batch, target_example_batch in dataset.take(1):
+    example_batch_predictions = model(input_example_batch)
+    print(example_batch_predictions.shape, "# (batch_size, sequence_length, vocab_size)")
 
-# Print the model summary
 model.summary()
 
-# Parameters
-embedding_dim = 100
-lstm_units = 150
-learning_rate = 0.01
+sampled_indices = tf.random.categorical(example_batch_predictions[0], num_samples=1)
+sampled_indices = tf.squeeze(sampled_indices, axis=-1).numpy()
 
-# Build the model
-model = tf.keras.models.Sequential(
-    [
-        tf.keras.Input(shape=(max_sequence_len - 1,)),
-        tf.keras.layers.Embedding(vocab_size, embedding_dim),
-        tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(lstm_units)),
-        tf.keras.layers.Dense(vocab_size, activation="softmax"),
-    ]
-)
+sampled_indices
 
-# Use categorical crossentropy because this is a multi-class problem
-model.compile(
-    loss="categorical_crossentropy",
-    optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate),
-    metrics=["accuracy"],
-)
+print("Input:\n", text_from_ids(input_example_batch[0]).numpy())
+print()
+print("Next Char Predictions:\n", text_from_ids(sampled_indices).numpy())
 
-# Print the model summary
-model.summary()
+loss = tf.losses.SparseCategoricalCrossentropy(from_logits=True)
 
-# Parameters
-embedding_dim = 100
-lstm_units = 150
-learning_rate = 0.01
+example_batch_mean_loss = loss(target_example_batch, example_batch_predictions)
+print("Prediction shape: ", example_batch_predictions.shape, " # (batch_size, sequence_length, vocab_size)")
+print("Mean loss:        ", example_batch_mean_loss)
 
-# Build the model
-model = tf.keras.models.Sequential(
-    [
-        tf.keras.Input(shape=(max_sequence_len - 1,)),
-        tf.keras.layers.Embedding(vocab_size, embedding_dim),
-        tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(lstm_units)),
-        tf.keras.layers.Dense(vocab_size, activation="softmax"),
-    ]
-)
+tf.exp(example_batch_mean_loss).numpy()
 
-# Use categorical crossentropy because this is a multi-class problem
-model.compile(
-    loss="categorical_crossentropy",
-    optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate),
-    metrics=["accuracy"],
-)
+model.compile(optimizer="adam", loss=loss, metrics=["sparse_categorical_accuracy"])
 
-# Print the model summary
-model.summary()
+EPOCHS = 20
 
-# --------------------------------------------------------------------------------------------------------
+history = model.fit(dataset, epochs=EPOCHS)
 
-# Define seed text
-seed_text = "help me obi-wan kenobi youre my only hope"
 
-# Define total words to predict
-next_words = 100
+class OneStep(tf.keras.Model):
+    def __init__(self, model, chars_from_ids, ids_from_chars, temperature=1.0):
+        super().__init__()
+        self.temperature = temperature
+        self.model = model
+        self.chars_from_ids = chars_from_ids
+        self.ids_from_chars = ids_from_chars
 
-# Loop until desired length is reached
-for _ in range(next_words):
+        # Create a mask to prevent "[UNK]" from being generated.
+        skip_ids = self.ids_from_chars(["[UNK]"])[:, None]
+        sparse_mask = tf.SparseTensor(
+            # Put a -inf at each bad index.
+            values=[-float("inf")] * len(skip_ids),
+            indices=skip_ids,
+            # Match the shape to the vocabulary
+            dense_shape=[len(ids_from_chars.get_vocabulary())],
+        )
+        self.prediction_mask = tf.sparse.to_dense(sparse_mask)
 
-    # Generate the integer sequence of the current line
-    sequence = vectorize_layer(seed_text)
+    @tf.function
+    def generate_one_step(self, inputs, states=None):
+        # Convert strings to token IDs.
+        input_chars = tf.strings.unicode_split(inputs, "UTF-8")
+        input_ids = self.ids_from_chars(input_chars).to_tensor()
 
-    # Pad the sequence
-    sequence = tf.keras.utils.pad_sequences([sequence], maxlen=max_sequence_len - 1, padding="pre")
+        # Embedding layer
+        x = self.model.layers[0](input_ids)
+        # GRU layer
+        x = self.model.layers[1](x, initial_state=states)
+        # Get the hidden state of the last timestep
+        states = x[:, -1, :]
+        # Dense layer
+        predicted_logits = self.model.layers[2](x)
 
-    # Feed to the model and get the probabilities for each index
-    probabilities = model.predict(sequence, verbose=0)
+        # Only use the last prediction.
+        predicted_logits = predicted_logits[:, -1, :]
+        predicted_logits = predicted_logits / self.temperature
 
-    # Get the index with the highest probability
-    predicted = np.argmax(probabilities, axis=-1)[0]
+        # Apply the prediction mask: prevent "[UNK]" from being generated.
+        predicted_logits = predicted_logits + self.prediction_mask
 
-    # Ignore if index is 0 because that is just the padding.
-    if predicted != 0:
+        # # Sample the output logits to generate token IDs.
+        predicted_ids = tf.random.categorical(predicted_logits, num_samples=1)
+        predicted_ids = tf.squeeze(predicted_ids, axis=-1)
 
-        # Look up the word associated with the index.
-        output_word = vocabulary[predicted]
+        # # Convert from token ids to characters
+        predicted_chars = self.chars_from_ids(predicted_ids)
 
-        # Combine with the seed text
-        seed_text += " " + output_word
+        # Return the characters and model state.
+        return predicted_chars, states
 
-# Print the result
-print(seed_text, "\n")
 
-# --------------------------------------------------------------------------------------------------------
+one_step_model = OneStep(model, chars_from_ids, ids_from_chars)
 
-# Define seed text
-seed_text = "help me obi-wan kenobi youre my only hope"
+start = time.time()
+states = None
+next_char = tf.constant(["ROMEO:"])
+result = [next_char]
 
-# Define total words to predict
-next_words = 100
+for n in range(1000):
+    next_char, states = one_step_model.generate_one_step(next_char, states=states)
+    result.append(next_char)
 
-# Loop until desired length is reached
-for _ in range(next_words):
+result = tf.strings.join(result)
+end = time.time()
+print(result[0].numpy().decode("utf-8"), "\n\n" + "_" * 80)
+print("\nRun time:", end - start)
 
-    # Convert the seed text to an integer sequence
-    sequence = vectorize_layer(seed_text)
+# ---------------------------------------------------------------------------------------------
 
-    # Pad the sequence
-    sequence = tf.keras.utils.pad_sequences([sequence], maxlen=max_sequence_len - 1, padding="pre")
+start = time.time()
+states = None
+next_char = tf.constant(["ROMEO:", "ROMEO:", "ROMEO:", "ROMEO:", "ROMEO:"])
+result = [next_char]
 
-    # Feed to the model and get the probabilities for each index
-    probabilities = model.predict(sequence, verbose=0)
+for n in range(1000):
+    next_char, states = one_step_model.generate_one_step(next_char, states=states)
+    result.append(next_char)
 
-    # Pick a random number from [1,2,3]
-    choice = np.random.choice([1, 2, 3])
+results = tf.strings.join(result)
+end = time.time()
 
-    # Sort the probabilities in ascending order
-    # and get the random choice from the end of the array
-    predicted = np.argsort(probabilities)[0][-choice]
+for text in results:
+    print(text.numpy().decode("utf-8"), "\n\n" + "_" * 80)
 
-    # Ignore if index is 0 because that is just the padding.
-    if predicted != 0:
+print("\nRun time:", end - start)
 
-        # Look up the word associated with the index.
-        output_word = vocabulary[predicted]
 
-        # Combine with the seed text
-        seed_text += " " + output_word
+tf.saved_model.save(one_step_model, "one_step")
+one_step_reloaded = tf.saved_model.load("one_step")
 
-# Print the result
-print(seed_text)
+states = None
+next_char = tf.constant(["ROMEO:"])
+result = [next_char]
+
+for n in range(100):
+    next_char, states = one_step_reloaded.generate_one_step(next_char, states=states)
+    result.append(next_char)
+
+print(tf.strings.join(result)[0].numpy().decode("utf-8"))
