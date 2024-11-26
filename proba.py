@@ -1,235 +1,179 @@
-import os
-import time
-
 import numpy as np
 import tensorflow as tf
 
-path_to_file = f"./data/shakespeare.txt"
 
-# Read, then decode for py2 compat.
-text = open(path_to_file, "rb").read().decode(encoding="utf-8")
-# length of text is the number of characters in it
-print(f"Length of text: {len(text)} characters")
+def trend(time, slope=0):
+    """
+    Generates synthetic data that follows a straight line given a slope value.
 
-# Take a look at the first 250 characters in text
-print(text[:250])
+    Args:
+      time (array of int) - contains the time steps
+      slope (float) - determines the direction and steepness of the line
 
-# The unique characters in the file
-vocab = sorted(set(text))
-print(f"{len(vocab)} unique characters")
+    Returns:
+      series (array of float) - measurements that follow a straight line
+    """
 
-example_texts = ["abcdefg", "xyz"]
+    # Compute the linear series given the slope
+    series = slope * time
 
-chars = tf.strings.unicode_split(example_texts, input_encoding="UTF-8")
-chars
+    return series
 
-ids_from_chars = tf.keras.layers.StringLookup(vocabulary=list(vocab), mask_token=None)
 
-ids = ids_from_chars(chars)
-ids
+def seasonal_pattern(season_time):
+    """
+    Just an arbitrary pattern, you can change it if you wish
 
-chars_from_ids = tf.keras.layers.StringLookup(vocabulary=ids_from_chars.get_vocabulary(), invert=True, mask_token=None)
+    Args:
+      season_time (array of float) - contains the measurements per time step
 
-chars = chars_from_ids(ids)
-chars
+    Returns:
+      data_pattern (array of float) -  contains revised measurement values according
+                                  to the defined pattern
+    """
 
-tf.strings.reduce_join(chars, axis=-1).numpy()
+    # Generate the values using an arbitrary pattern
+    data_pattern = np.where(season_time < 0.4, np.cos(season_time * 2 * np.pi), 1 / np.exp(3 * season_time))
 
+    return data_pattern
 
-def text_from_ids(ids):
-    return tf.strings.reduce_join(chars_from_ids(ids), axis=-1)
 
+def seasonality(time, period, amplitude=1, phase=0):
+    """
+    Repeats the same pattern at each period
 
-all_ids = ids_from_chars(tf.strings.unicode_split(text, "UTF-8"))
-all_ids
+    Args:
+      time (array of int) - contains the time steps
+      period (int) - number of time steps before the pattern repeats
+      amplitude (int) - peak measured value in a period
+      phase (int) - number of time steps to shift the measured values
 
-ids_dataset = tf.data.Dataset.from_tensor_slices(all_ids)
+    Returns:
+      data_pattern (array of float) - seasonal data scaled by the defined amplitude
+    """
 
-for ids in ids_dataset.take(10):
-    print(chars_from_ids(ids).numpy().decode("utf-8"))
+    # Define the measured values per period
+    season_time = ((time + phase) % period) / period
 
-seq_length = 100
+    # Generates the seasonal data scaled by the defined amplitude
+    data_pattern = amplitude * seasonal_pattern(season_time)
 
-sequences = ids_dataset.batch(seq_length + 1, drop_remainder=True)
+    return data_pattern
 
-for seq in sequences.take(1):
-    print(chars_from_ids(seq))
 
-for seq in sequences.take(5):
-    print(text_from_ids(seq).numpy())
+def noise(time, noise_level=1, seed=None):
+    """Generates a normally distributed noisy signal
 
+    Args:
+      time (array of int) - contains the time steps
+      noise_level (float) - scaling factor for the generated signal
+      seed (int) - number generator seed for repeatability
 
-def split_input_target(sequence):
-    input_text = sequence[:-1]
-    target_text = sequence[1:]
-    return input_text, target_text
+    Returns:
+      noise (array of float) - the noisy signal
+    """
 
+    # Initialize the random number generator
+    rnd = np.random.RandomState(seed)
 
-split_input_target(list("Tensorflow"))
+    # Generate a random number for each time step and scale by the noise level
+    noise = rnd.randn(len(time)) * noise_level
 
-dataset_split = sequences.map(split_input_target)
+    return noise
 
-for input_example, target_example in dataset_split.take(1):
-    print("Input :", text_from_ids(input_example).numpy())
-    print("Target:", text_from_ids(target_example).numpy())
 
-# Batch size
-BATCH_SIZE = 64
+# Parameters
+time = np.arange(4 * 365 + 1, dtype="float32")
+baseline = 10
+amplitude = 40
+slope = 0.05
+noise_level = 5
 
-# Buffer size to shuffle the dataset
-# (TF data is designed to work with possibly infinite sequences,
-# so it doesn't attempt to shuffle the entire sequence in memory. Instead,
-# it maintains a buffer in which it shuffles elements).
-BUFFER_SIZE = 10000
+# Create the series
+series = baseline + trend(time, slope) + seasonality(time, period=365, amplitude=amplitude)
 
-dataset = dataset_split.shuffle(BUFFER_SIZE).batch(BATCH_SIZE, drop_remainder=True).cache().prefetch(tf.data.AUTOTUNE)
+# Update with noise
+series += noise(time, noise_level, seed=42)
 
-dataset
+# Define the split time
+split_time = 1000
 
-# Length of the vocabulary in StringLookup Layer
-vocab_size = len(ids_from_chars.get_vocabulary())
+# Get the train set
+time_train = time[:split_time]
+x_train = series[:split_time]
 
-# The embedding dimension
-embedding_dim = 256
+# Get the validation set
+time_valid = time[split_time:]
+x_valid = series[split_time:]
 
-# Number of RNN units
-rnn_units = 1024
+# Generate the naive forecast
+naive_forecast = series[split_time - 1 : -1]
 
-model = tf.keras.Sequential(
-    [
-        tf.keras.layers.Embedding(vocab_size, embedding_dim),
-        tf.keras.layers.GRU(rnn_units, return_sequences=True),
-        tf.keras.layers.Dense(vocab_size),
-    ]
-)
+# Define time step
+time_step = 100
 
-for input_example_batch, target_example_batch in dataset.take(1):
-    example_batch_predictions = model(input_example_batch)
-    print(example_batch_predictions.shape, "# (batch_size, sequence_length, vocab_size)")
+# Print values
+print(f"ground truth at time step {time_step}: {x_valid[time_step]}")
+print(f"prediction at time step {time_step + 1}: {naive_forecast[time_step + 1]}")
 
-model.summary()
+print(tf.keras.metrics.mse(x_valid, naive_forecast).numpy())
+print(tf.keras.metrics.mae(x_valid, naive_forecast).numpy())
 
-sampled_indices = tf.random.categorical(example_batch_predictions[0], num_samples=1)
-sampled_indices = tf.squeeze(sampled_indices, axis=-1).numpy()
 
-sampled_indices
+def moving_average_forecast(series, window_size):
+    """Generates a moving average forecast
 
-print("Input:\n", text_from_ids(input_example_batch[0]).numpy())
-print()
-print("Next Char Predictions:\n", text_from_ids(sampled_indices).numpy())
+    Args:
+      series (array of float) - contains the values of the time series
+      window_size (int) - the number of time steps to compute the average for
 
-loss = tf.losses.SparseCategoricalCrossentropy(from_logits=True)
+    Returns:
+      forecast (array of float) - the moving average forecast
+    """
 
-example_batch_mean_loss = loss(target_example_batch, example_batch_predictions)
-print("Prediction shape: ", example_batch_predictions.shape, " # (batch_size, sequence_length, vocab_size)")
-print("Mean loss:        ", example_batch_mean_loss)
+    # Initialize a list
+    forecast = []
 
-tf.exp(example_batch_mean_loss).numpy()
+    # Compute the moving average based on the window size
+    for time in range(len(series) - window_size):
+        forecast.append(series[time : time + window_size].mean())
 
-model.compile(optimizer="adam", loss=loss, metrics=["sparse_categorical_accuracy"])
+    # Convert to a numpy array
+    forecast = np.array(forecast)
 
-EPOCHS = 20
+    return forecast
 
-history = model.fit(dataset, epochs=EPOCHS)
 
+moving_avg = moving_average_forecast(series, 30)[split_time - 30 :]
 
-class OneStep(tf.keras.Model):
-    def __init__(self, model, chars_from_ids, ids_from_chars, temperature=1.0):
-        super().__init__()
-        self.temperature = temperature
-        self.model = model
-        self.chars_from_ids = chars_from_ids
-        self.ids_from_chars = ids_from_chars
+# Compute the metrics
+print(tf.keras.metrics.mse(x_valid, moving_avg).numpy())
+print(tf.keras.metrics.mae(x_valid, moving_avg).numpy())
 
-        # Create a mask to prevent "[UNK]" from being generated.
-        skip_ids = self.ids_from_chars(["[UNK]"])[:, None]
-        sparse_mask = tf.SparseTensor(
-            # Put a -inf at each bad index.
-            values=[-float("inf")] * len(skip_ids),
-            indices=skip_ids,
-            # Match the shape to the vocabulary
-            dense_shape=[len(ids_from_chars.get_vocabulary())],
-        )
-        self.prediction_mask = tf.sparse.to_dense(sparse_mask)
+# Subtract the values at t-365 from original series
+diff_series = series[365:] - series[:-365]
 
-    @tf.function
-    def generate_one_step(self, inputs, states=None):
-        # Convert strings to token IDs.
-        input_chars = tf.strings.unicode_split(inputs, "UTF-8")
-        input_ids = self.ids_from_chars(input_chars).to_tensor()
+# Truncate the first 365 time steps
+diff_time = time[365:]
 
-        # Embedding layer
-        x = self.model.layers[0](input_ids)
-        # GRU layer
-        x = self.model.layers[1](x, initial_state=states)
-        # Get the hidden state of the last timestep
-        states = x[:, -1, :]
-        # Dense layer
-        predicted_logits = self.model.layers[2](x)
+# Generate moving average from the time differenced dataset
+diff_moving_avg = moving_average_forecast(diff_series, 30)
 
-        # Only use the last prediction.
-        predicted_logits = predicted_logits[:, -1, :]
-        predicted_logits = predicted_logits / self.temperature
+# Slice the prediction points that corresponds to the validation set time steps
+diff_moving_avg = diff_moving_avg[split_time - 365 - 30 :]
 
-        # Apply the prediction mask: prevent "[UNK]" from being generated.
-        predicted_logits = predicted_logits + self.prediction_mask
+# Slice the ground truth points that corresponds to the validation set time steps
+diff_series = diff_series[split_time - 365 :]
 
-        # # Sample the output logits to generate token IDs.
-        predicted_ids = tf.random.categorical(predicted_logits, num_samples=1)
-        predicted_ids = tf.squeeze(predicted_ids, axis=-1)
+# Add the trend and seasonality from the original series
+diff_moving_avg_plus_past = series[split_time - 365 : -365] + diff_moving_avg
 
-        # # Convert from token ids to characters
-        predicted_chars = self.chars_from_ids(predicted_ids)
+print(tf.keras.metrics.mse(x_valid, diff_moving_avg_plus_past).numpy())
+print(tf.keras.metrics.mae(x_valid, diff_moving_avg_plus_past).numpy())
 
-        # Return the characters and model state.
-        return predicted_chars, states
+# Smooth the original series before adding the time differenced moving average
+diff_moving_avg_plus_smooth_past = moving_average_forecast(series[split_time - 370 : -359], 11) + diff_moving_avg
 
-
-one_step_model = OneStep(model, chars_from_ids, ids_from_chars)
-
-start = time.time()
-states = None
-next_char = tf.constant(["ROMEO:"])
-result = [next_char]
-
-for n in range(1000):
-    next_char, states = one_step_model.generate_one_step(next_char, states=states)
-    result.append(next_char)
-
-result = tf.strings.join(result)
-end = time.time()
-print(result[0].numpy().decode("utf-8"), "\n\n" + "_" * 80)
-print("\nRun time:", end - start)
-
-# ---------------------------------------------------------------------------------------------
-
-start = time.time()
-states = None
-next_char = tf.constant(["ROMEO:", "ROMEO:", "ROMEO:", "ROMEO:", "ROMEO:"])
-result = [next_char]
-
-for n in range(1000):
-    next_char, states = one_step_model.generate_one_step(next_char, states=states)
-    result.append(next_char)
-
-results = tf.strings.join(result)
-end = time.time()
-
-for text in results:
-    print(text.numpy().decode("utf-8"), "\n\n" + "_" * 80)
-
-print("\nRun time:", end - start)
-
-
-tf.saved_model.save(one_step_model, "one_step")
-one_step_reloaded = tf.saved_model.load("one_step")
-
-states = None
-next_char = tf.constant(["ROMEO:"])
-result = [next_char]
-
-for n in range(100):
-    next_char, states = one_step_reloaded.generate_one_step(next_char, states=states)
-    result.append(next_char)
-
-print(tf.strings.join(result)[0].numpy().decode("utf-8"))
+# Compute the metrics
+print(tf.keras.metrics.mse(x_valid, diff_moving_avg_plus_smooth_past).numpy())
+print(tf.keras.metrics.mae(x_valid, diff_moving_avg_plus_smooth_past).numpy())
