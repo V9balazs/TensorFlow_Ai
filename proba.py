@@ -120,6 +120,17 @@ x_train = series[:split_time]
 time_valid = time[split_time:]
 x_valid = series[split_time:]
 
+# Define the split time
+split_time = 1000
+
+# Get the train set
+time_train = time[:split_time]
+x_train = series[:split_time]
+
+# Get the validation set
+time_valid = time[split_time:]
+x_valid = series[split_time:]
+
 # Parameters
 window_size = 20
 batch_size = 32
@@ -131,7 +142,7 @@ def windowed_dataset(series, window_size, batch_size, shuffle_buffer):
 
     Args:
       series (array of float) - contains the values of the time series
-      window_size (int) - the number of time steps to include in the feature
+      window_size (int) - the number of time steps to average
       batch_size (int) - the batch size
       shuffle_buffer(int) - buffer size to use for the shuffle method
 
@@ -166,65 +177,101 @@ def windowed_dataset(series, window_size, batch_size, shuffle_buffer):
 # Generate the dataset windows
 dataset = windowed_dataset(x_train, window_size, batch_size, shuffle_buffer_size)
 
-# Print properties of a single batch
-for windows in dataset.take(1):
-    print(f"data type: {type(windows)}")
-    print(f"number of elements in the tuple: {len(windows)}")
-    print(f"shape of first element: {windows[0].shape}")
-    print(f"shape of second element: {windows[1].shape}")
-
-# Build the single layer neural network
-l0 = tf.keras.layers.Dense(1)
-model = tf.keras.models.Sequential([tf.keras.Input(shape=(window_size,)), l0])
-
-# Print the initial layer weights
-print("Layer weights: \n {} \n".format(l0.get_weights()))
+# Build the model
+model_baseline = tf.keras.models.Sequential(
+    [
+        tf.keras.Input(shape=(window_size,)),
+        tf.keras.layers.Dense(10, activation="relu"),
+        tf.keras.layers.Dense(10, activation="relu"),
+        tf.keras.layers.Dense(1),
+    ]
+)
 
 # Print the model summary
-model.summary()
+model_baseline.summary()
 
 # Set the training parameters
-model.compile(loss="mse", optimizer=tf.keras.optimizers.SGD(learning_rate=1e-6, momentum=0.9))
+model_baseline.compile(loss="mse", optimizer=tf.keras.optimizers.SGD(learning_rate=1e-6, momentum=0.9))
 
 # Train the model
-model.fit(dataset, epochs=100)
-
-# Print the layer weights
-print("Layer weights {}".format(l0.get_weights()))
-
-# Shape of the first 20 data points slice
-print(f"shape of series[0:20]: {series[0:20].shape}")
-
-# Shape after adding a batch dimension
-print(f"shape of series[0:20][np.newaxis]: {series[0:20][np.newaxis].shape}")
-
-# Shape after adding a batch dimension (alternate way)
-print(f"shape of series[0:20][np.newaxis]: {np.expand_dims(series[0:20], axis=0).shape}")
-
-# Sample model prediction
-print(f"model prediction: {model.predict(series[0:20][np.newaxis])}")
+model_baseline.fit(dataset, epochs=100)
 
 # Initialize a list
 forecast = []
 
+# Reduce the original series
+forecast_series = series[split_time - window_size :]
+
 # Use the model to predict data points per window size
-for time in range(len(series) - window_size):
-    forecast.append(model.predict(series[time : time + window_size][np.newaxis], verbose=0))
-
-# Slice the points that are aligned with the validation set
-forecast = forecast[split_time - window_size :]
-
-# Compare number of elements in the predictions and the validation set
-print(f"length of the forecast list: {len(forecast)}")
-print(f"shape of the validation set: {x_valid.shape}")
-
-# Preview shapes after using the conversion and squeeze methods
-print(f"shape after converting to numpy array: {np.array(forecast).shape}")
-print(f"shape after squeezing: {np.array(forecast).squeeze().shape}")
+for time in range(len(forecast_series) - window_size):
+    forecast.append(model_baseline.predict(forecast_series[time : time + window_size][np.newaxis], verbose=0))
 
 # Convert to a numpy array and drop single dimensional axes
 results = np.array(forecast).squeeze()
 
+# Plot the results
+plot_series(time_valid, (x_valid, results))
+
 # Compute the metrics
+print(tf.keras.metrics.mse(x_valid, results).numpy())
+print(tf.keras.metrics.mae(x_valid, results).numpy())
+
+# Build the Model
+model_tune = tf.keras.models.Sequential(
+    [
+        tf.keras.Input(shape=(window_size,)),
+        tf.keras.layers.Dense(10, activation="relu"),
+        tf.keras.layers.Dense(10, activation="relu"),
+        tf.keras.layers.Dense(1),
+    ]
+)
+
+# Set the learning rate scheduler
+lr_schedule = tf.keras.callbacks.LearningRateScheduler(lambda epoch: 1e-8 * 10 ** (epoch / 20))
+
+# Initialize the optimizer
+optimizer = tf.keras.optimizers.SGD(momentum=0.9)
+
+# Set the training parameters
+model_tune.compile(loss="mse", optimizer=optimizer)
+
+# Train the model
+history = model_tune.fit(dataset, epochs=100, callbacks=[lr_schedule])
+
+# Define the learning rate array
+lrs = 1e-8 * (10 ** (np.arange(100) / 20))
+
+# Build the model
+model_tune = tf.keras.models.Sequential(
+    [
+        tf.keras.Input(shape=(window_size,)),
+        tf.keras.layers.Dense(10, activation="relu"),
+        tf.keras.layers.Dense(10, activation="relu"),
+        tf.keras.layers.Dense(1),
+    ]
+)
+
+# Set the optimizer with the tuned learning rate
+optimizer = tf.keras.optimizers.SGD(learning_rate=4e-6, momentum=0.9)
+
+# Set the training parameters
+model_tune.compile(loss="mse", optimizer=optimizer)
+
+# Train the model
+history = model_tune.fit(dataset, epochs=100)
+
+# Initialize a list
+forecast = []
+
+# Reduce the original series
+forecast_series = series[split_time - window_size :]
+
+# Use the model to predict data points per window size
+for time in range(len(forecast_series) - window_size):
+    forecast.append(model_tune.predict(forecast_series[time : time + window_size][np.newaxis], verbose=0))
+
+# Convert to a numpy array and drop single dimensional axes
+results = np.array(forecast).squeeze()
+
 print(tf.keras.metrics.mse(x_valid, results).numpy())
 print(tf.keras.metrics.mae(x_valid, results).numpy())
