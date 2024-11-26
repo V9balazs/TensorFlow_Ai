@@ -1,179 +1,111 @@
-import numpy as np
 import tensorflow as tf
 
+# Generate a tf dataset with 10 elements (i.e. numbers 0 to 9)
+dataset = tf.data.Dataset.range(10)
 
-def trend(time, slope=0):
-    """
-    Generates synthetic data that follows a straight line given a slope value.
+# Preview the result
+for val in dataset:
+    print(val.numpy())
 
-    Args:
-      time (array of int) - contains the time steps
-      slope (float) - determines the direction and steepness of the line
+# Generate a tf dataset with 10 elements (i.e. numbers 0 to 9)
+dataset = tf.data.Dataset.range(10)
 
-    Returns:
-      series (array of float) - measurements that follow a straight line
-    """
+# Window the data
+dataset = dataset.window(size=5, shift=1)
 
-    # Compute the linear series given the slope
-    series = slope * time
+# Print the result
+for window_dataset in dataset:
+    print(window_dataset)
 
-    return series
+# Print the result
+for window_dataset in dataset:
+    print([item.numpy() for item in window_dataset])
 
+# Generate a tf dataset with 10 elements (i.e. numbers 0 to 9)
+dataset = tf.data.Dataset.range(10)
 
-def seasonal_pattern(season_time):
-    """
-    Just an arbitrary pattern, you can change it if you wish
+# Window the data but only take those with the specified size
+dataset = dataset.window(size=5, shift=1, drop_remainder=True)
 
-    Args:
-      season_time (array of float) - contains the measurements per time step
+# Print the result
+for window_dataset in dataset:
+    print([item.numpy() for item in window_dataset])
 
-    Returns:
-      data_pattern (array of float) -  contains revised measurement values according
-                                  to the defined pattern
-    """
+# Generate a tf dataset with 10 elements (i.e. numbers 0 to 9)
+dataset = tf.data.Dataset.range(10)
 
-    # Generate the values using an arbitrary pattern
-    data_pattern = np.where(season_time < 0.4, np.cos(season_time * 2 * np.pi), 1 / np.exp(3 * season_time))
+# Window the data but only take those with the specified size
+dataset = dataset.window(5, shift=1, drop_remainder=True)
 
-    return data_pattern
+# Flatten the windows by putting its elements in a single batch
+dataset = dataset.flat_map(lambda window: window.batch(5))
 
+# Print the results
+for window in dataset:
+    print(window.numpy())
 
-def seasonality(time, period, amplitude=1, phase=0):
-    """
-    Repeats the same pattern at each period
+# Generate a tf dataset with 10 elements (i.e. numbers 0 to 9)
+dataset = tf.data.Dataset.range(10)
 
-    Args:
-      time (array of int) - contains the time steps
-      period (int) - number of time steps before the pattern repeats
-      amplitude (int) - peak measured value in a period
-      phase (int) - number of time steps to shift the measured values
+# Window the data but only take those with the specified size
+dataset = dataset.window(5, shift=1, drop_remainder=True)
 
-    Returns:
-      data_pattern (array of float) - seasonal data scaled by the defined amplitude
-    """
+# Flatten the windows by putting its elements in a single batch
+dataset = dataset.flat_map(lambda window: window.batch(5))
 
-    # Define the measured values per period
-    season_time = ((time + phase) % period) / period
+# Create tuples with features (first four elements of the window) and labels (last element)
+dataset = dataset.map(lambda window: (window[:-1], window[-1]))
 
-    # Generates the seasonal data scaled by the defined amplitude
-    data_pattern = amplitude * seasonal_pattern(season_time)
+# Print the results
+for x, y in dataset:
+    print("x = ", x.numpy())
+    print("y = ", y.numpy())
+    print()
 
-    return data_pattern
+# Generate a tf dataset with 10 elements (i.e. numbers 0 to 9)
+dataset = tf.data.Dataset.range(10)
 
+# Window the data but only take those with the specified size
+dataset = dataset.window(5, shift=1, drop_remainder=True)
 
-def noise(time, noise_level=1, seed=None):
-    """Generates a normally distributed noisy signal
+# Flatten the windows by putting its elements in a single batch
+dataset = dataset.flat_map(lambda window: window.batch(5))
 
-    Args:
-      time (array of int) - contains the time steps
-      noise_level (float) - scaling factor for the generated signal
-      seed (int) - number generator seed for repeatability
+# Create tuples with features (first four elements of the window) and labels (last element)
+dataset = dataset.map(lambda window: (window[:-1], window[-1]))
 
-    Returns:
-      noise (array of float) - the noisy signal
-    """
+# Shuffle the windows
+dataset = dataset.shuffle(buffer_size=10)
 
-    # Initialize the random number generator
-    rnd = np.random.RandomState(seed)
+# Print the results
+for x, y in dataset:
+    print("x = ", x.numpy())
+    print("y = ", y.numpy())
+    print()
 
-    # Generate a random number for each time step and scale by the noise level
-    noise = rnd.randn(len(time)) * noise_level
+# Generate a tf dataset with 10 elements (i.e. numbers 0 to 9)
+dataset = tf.data.Dataset.range(10)
 
-    return noise
+# Window the data but only take those with the specified size
+dataset = dataset.window(5, shift=1, drop_remainder=True)
 
+# Flatten the windows by putting its elements in a single batch
+dataset = dataset.flat_map(lambda window: window.batch(5))
 
-# Parameters
-time = np.arange(4 * 365 + 1, dtype="float32")
-baseline = 10
-amplitude = 40
-slope = 0.05
-noise_level = 5
+# Create tuples with features (first four elements of the window) and labels (last element)
+dataset = dataset.map(lambda window: (window[:-1], window[-1]))
 
-# Create the series
-series = baseline + trend(time, slope) + seasonality(time, period=365, amplitude=amplitude)
+# Shuffle the windows
+dataset = dataset.shuffle(buffer_size=10)
 
-# Update with noise
-series += noise(time, noise_level, seed=42)
+# Create batches of windows
+dataset = dataset.batch(2)
 
-# Define the split time
-split_time = 1000
+# Optimize the dataset for training
+dataset = dataset.cache().prefetch(1)
 
-# Get the train set
-time_train = time[:split_time]
-x_train = series[:split_time]
-
-# Get the validation set
-time_valid = time[split_time:]
-x_valid = series[split_time:]
-
-# Generate the naive forecast
-naive_forecast = series[split_time - 1 : -1]
-
-# Define time step
-time_step = 100
-
-# Print values
-print(f"ground truth at time step {time_step}: {x_valid[time_step]}")
-print(f"prediction at time step {time_step + 1}: {naive_forecast[time_step + 1]}")
-
-print(tf.keras.metrics.mse(x_valid, naive_forecast).numpy())
-print(tf.keras.metrics.mae(x_valid, naive_forecast).numpy())
-
-
-def moving_average_forecast(series, window_size):
-    """Generates a moving average forecast
-
-    Args:
-      series (array of float) - contains the values of the time series
-      window_size (int) - the number of time steps to compute the average for
-
-    Returns:
-      forecast (array of float) - the moving average forecast
-    """
-
-    # Initialize a list
-    forecast = []
-
-    # Compute the moving average based on the window size
-    for time in range(len(series) - window_size):
-        forecast.append(series[time : time + window_size].mean())
-
-    # Convert to a numpy array
-    forecast = np.array(forecast)
-
-    return forecast
-
-
-moving_avg = moving_average_forecast(series, 30)[split_time - 30 :]
-
-# Compute the metrics
-print(tf.keras.metrics.mse(x_valid, moving_avg).numpy())
-print(tf.keras.metrics.mae(x_valid, moving_avg).numpy())
-
-# Subtract the values at t-365 from original series
-diff_series = series[365:] - series[:-365]
-
-# Truncate the first 365 time steps
-diff_time = time[365:]
-
-# Generate moving average from the time differenced dataset
-diff_moving_avg = moving_average_forecast(diff_series, 30)
-
-# Slice the prediction points that corresponds to the validation set time steps
-diff_moving_avg = diff_moving_avg[split_time - 365 - 30 :]
-
-# Slice the ground truth points that corresponds to the validation set time steps
-diff_series = diff_series[split_time - 365 :]
-
-# Add the trend and seasonality from the original series
-diff_moving_avg_plus_past = series[split_time - 365 : -365] + diff_moving_avg
-
-print(tf.keras.metrics.mse(x_valid, diff_moving_avg_plus_past).numpy())
-print(tf.keras.metrics.mae(x_valid, diff_moving_avg_plus_past).numpy())
-
-# Smooth the original series before adding the time differenced moving average
-diff_moving_avg_plus_smooth_past = moving_average_forecast(series[split_time - 370 : -359], 11) + diff_moving_avg
-
-# Compute the metrics
-print(tf.keras.metrics.mse(x_valid, diff_moving_avg_plus_smooth_past).numpy())
-print(tf.keras.metrics.mae(x_valid, diff_moving_avg_plus_smooth_past).numpy())
+# Print the results
+for x, y in dataset:
+    print("x = ", x.numpy())
+    print("y = ", y.numpy())
+    print()
