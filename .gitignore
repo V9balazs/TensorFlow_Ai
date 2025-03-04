@@ -1,0 +1,5 @@
+checkpoints
+*.txt
+*.docx
+*.keras
+*.h5
